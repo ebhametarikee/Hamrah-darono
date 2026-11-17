@@ -1,3 +1,4 @@
+
 name: Hamrah Darono Monitor
 
 on:
@@ -16,28 +17,64 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare data folder
-        run: mkdir -p data
-
-      - name: Create status file
+      - name: Find Darono instrument
         run: |
-          cat > data/latest.json <<'EOF'
-          {
-            "app": "Hamrah Darono",
-            "fund": "دارونو",
-            "status": "monitoring_setup",
-            "price": null,
-            "nav": null,
-            "bubble": null,
-            "message": "Waiting for a verified market data source",
-            "updated_at": "وقت به‌روزرسانی ثبت نشده"
-          }
-          EOF
+          python - <<'PY'
+          import requests
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.parse import quote
 
-      - name: Save monitoring data
+          symbol = "دارونو"
+          url = "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/" + quote(symbol)
+
+          headers = {
+              "User-Agent": "Mozilla/5.0",
+              "Accept": "application/json",
+              "Referer": "https://www.tsetmc.com/"
+          }
+
+          response = requests.get(url, headers=headers, timeout=30)
+          response.raise_for_status()
+          result = response.json()
+
+          instruments = result.get("instrumentSearch", [])
+          matches = [
+              item for item in instruments
+              if item.get("lVal18AFC", "").strip() == symbol
+          ]
+
+          if len(matches) != 1:
+              raise RuntimeError(
+                  f"Expected one exact match for {symbol}, found {len(matches)}"
+              )
+
+          item = matches[0]
+
+          data = {
+              "fund": "دارونو",
+              "symbol": symbol,
+              "insCode": item["insCode"],
+              "instrument_name": item.get("lVal30"),
+              "status": "instrument_found",
+              "source": "TSETMC",
+              "updated_at": datetime.now(timezone.utc).isoformat()
+          }
+
+          Path("data").mkdir(exist_ok=True)
+          Path("data/latest.json").write_text(
+              json.dumps(data, ensure_ascii=False, indent=2),
+              encoding="utf-8"
+          )
+
+          print(json.dumps(data, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Save result
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest.json
-          git commit -m "Update Darono monitoring status" || echo "No changes"
+          git commit -m "Find Darono instrument code" || echo "No changes"
           git push
