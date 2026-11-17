@@ -3,6 +3,8 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#101827">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#101827">
 <title>همراه دارونو</title>
@@ -77,5 +79,15 @@ footer{text-align:center;color:#64748b;font-size:12px;margin-top:30px}
 </div>
 
 <footer>Hamrah Darono | نسخه اولیه</footer>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then(() => console.log("Darono ready"))
+      .catch(error => console.error(error));
+  });
+}
+</script>
 </body>
 </html>
