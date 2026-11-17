@@ -1,10 +1,9 @@
 {
-  "app": "Hamrah Darono",
   "fund": "دارونو",
-  "status": "monitoring_setup",
-  "price": null,
-  "nav": null,
-  "bubble": null,
-  "message": "Waiting for a verified market data source",
-  "updated_at": "وقت به‌روزرسانی ثبت نشده"
+  "symbol": "دارونو",
+  "insCode": "34074071043606558",
+  "instrument_name": "صندوق س صنايع مفيد5-بخشي",
+  "status": "instrument_found",
+  "source": "TSETMC",
+  "updated_at": "2026-11-17T19:57:54.561834+00:00"
 }
