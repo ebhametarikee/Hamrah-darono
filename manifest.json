@@ -1,0 +1,15 @@
+
+{
+  "name": "همراه دارونو",
+  "short_name": "دارونو",
+  "description": "دستیار هوشمند تحلیل صندوق دارونو",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101827",
+  "theme_color": "#101827",
+  "lang": "fa",
+  "dir": "rtl",
+  "icons": []
+}
