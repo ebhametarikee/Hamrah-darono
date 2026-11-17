@@ -1,0 +1,81 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#101827">
+<title>همراه دارونو</title>
+<style>
+*{box-sizing:border-box}
+body{
+margin:0;
+background:#101827;
+color:#f1f5f9;
+font-family:Tahoma,Arial,sans-serif;
+padding:20px;
+}
+header{text-align:center;padding:25px 0}
+h1{color:#4ade80;font-size:27px}
+.subtitle{color:#94a3b8;font-size:13px}
+.card{
+background:#1e293b;
+border:1px solid #334155;
+border-radius:16px;
+padding:20px;
+margin:15px 0;
+}
+.label{color:#94a3b8;font-size:13px}
+.value{font-size:25px;margin-top:12px;font-weight:bold}
+.green{color:#4ade80}
+button{
+width:100%;
+padding:15px;
+border:0;
+border-radius:12px;
+background:#16a34a;
+color:white;
+font-size:16px;
+font-weight:bold;
+margin-top:12px;
+}
+footer{text-align:center;color:#64748b;font-size:12px;margin-top:30px}
+</style>
+</head>
+<body>
+<header>
+<h1>همراه دارونو</h1>
+<div class="subtitle">دستیار هوشمند پایش و تحلیل صندوق دارونو</div>
+</header>
+
+<div class="card">
+<div class="label">وضعیت سامانه</div>
+<div class="value green">آماده راه‌اندازی</div>
+</div>
+
+<div class="card">
+<div class="label">قیمت آخرین معامله</div>
+<div class="value" id="price">---</div>
+</div>
+
+<div class="card">
+<div class="label">ارزش خالص دارایی (NAV)</div>
+<div class="value" id="nav">---</div>
+</div>
+
+<div class="card">
+<div class="label">حباب صندوق</div>
+<div class="value" id="bubble">---</div>
+</div>
+
+<div class="card">
+<div class="label">تحلیل و پایش بازار</div>
+<p>سامانه آماده اتصال به اطلاعات بازار و تحلیل نقاط ورود است.</p>
+<button onclick="alert('ماژول تحلیل در مرحله بعد فعال می‌شود')">
+شروع تحلیل
+</button>
+</div>
+
+<footer>Hamrah Darono | نسخه اولیه</footer>
+</body>
+</html>
