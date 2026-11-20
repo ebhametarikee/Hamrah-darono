@@ -2,7 +2,7 @@
   "insCode": "34074071043606558",
   "instrument_name": "دارونو",
   "source": "TSETMC",
-  "updated_at": "2026-11-20T10:47:51.863218+00:00",
+  "updated_at": "2026-11-20T10:56:46.328211+00:00",
   "market_data": {
     "closingPriceInfo": {
       "instrumentState": {
@@ -43,9 +43,13 @@
       "qTotCap": 1278837480759.0
     }
   },
-  "last_price": null,
-  "closing_price": null,
-  "volume": null,
-  "trade_value": null,
+  "last_price": 46516.0,
+  "closing_price": 46646.0,
+  "volume": 27415782.0,
+  "trade_value": 1278837480759.0,
+  "price_min": 45660.0,
+  "price_max": 47258.0,
+  "price_yesterday": 46760.0,
+  "market_date": 20261118,
   "data_errors": []
 }
