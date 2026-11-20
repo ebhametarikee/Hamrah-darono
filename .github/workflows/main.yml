@@ -17,24 +17,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch Darono market data
+      - name: Fetch and Analyze Darono
         run: |
           python - <<'PY'
           import json
           import os
-          import urllib.request
           import time
+          import urllib.request
           from datetime import datetime, timezone
 
           INS_CODE = "34074071043606558"
           BASE = "https://cdn.tsetmc.com/api/"
 
           def fetch(path, retries=3):
-              url = BASE + path
               for attempt in range(retries):
                   try:
                       req = urllib.request.Request(
-                          url,
+                          BASE + path,
                           headers={"User-Agent": "Mozilla/5.0"}
                       )
                       with urllib.request.urlopen(req, timeout=30) as r:
@@ -44,13 +43,135 @@ jobs:
                           raise
                       time.sleep(3 * (attempt + 1))
 
+          def number(value):
+              try:
+                  return float(value)
+              except (TypeError, ValueError):
+                  return None
+
+          def find_history_rows(obj):
+              candidates = []
+
+              def walk(value):
+                  if isinstance(value, dict):
+                      for child in value.values():
+                          walk(child)
+                  elif isinstance(value, list):
+                      valid = [
+                          x for x in value
+                          if isinstance(x, dict)
+                          and number(x.get("pClosing")) is not None
+                      ]
+                      if valid:
+                          candidates.append(valid)
+                      for child in value:
+                          walk(child)
+
+              walk(obj)
+
+              if not candidates:
+                  return []
+
+              return max(candidates, key=len)
+
+          def analyze(history, market):
+              rows = find_history_rows(history)
+
+              rows = sorted(
+                  rows,
+                  key=lambda x: str(x.get("dEven", ""))
+              )
+
+              closes = [
+                  number(x.get("pClosing"))
+                  for x in rows
+                  if number(x.get("pClosing")) is not None
+              ]
+
+              result = {
+                  "history_records": len(closes),
+                  "sma20": None,
+                  "sma50": None,
+                  "support_20": None,
+                  "resistance_20": None,
+                  "trend": "اطلاعات ناکافی",
+                  "entry_status": "نیازمند داده بیشتر",
+                  "analysis_notes": []
+              }
+
+              if len(closes) < 20:
+                  result["analysis_notes"].append(
+                      "برای تحلیل معتبر حداقل ۲۰ رکورد تاریخی لازم است."
+                  )
+                  return result
+
+              current = number(market.get("closing_price"))
+
+              if current is None:
+                  current = closes[-1]
+
+              sma20 = sum(closes[-20:]) / 20
+              result["sma20"] = round(sma20, 2)
+
+              recent20 = closes[-20:]
+              result["support_20"] = min(recent20)
+              result["resistance_20"] = max(recent20)
+
+              if len(closes) >= 50:
+                  sma50 = sum(closes[-50:]) / 50
+                  result["sma50"] = round(sma50, 2)
+
+                  if current > sma20 > sma50:
+                      result["trend"] = "صعودی"
+                  elif current < sma20 < sma50:
+                      result["trend"] = "نزولی"
+                  else:
+                      result["trend"] = "خنثی یا در حال تغییر"
+
+                  if current > sma20 and sma20 > sma50:
+                      result["entry_status"] = "بررسی فرصت ورود؛ تأییدهای بیشتر لازم است"
+                  elif current < sma20 and sma20 < sma50:
+                      result["entry_status"] = "عدم ورود عجولانه؛ روند ضعیف"
+                  else:
+                      result["entry_status"] = "انتظار برای تأیید روند"
+
+              else:
+                  result["trend"] = (
+                      "قیمت بالاتر از میانگین ۲۰ روزه"
+                      if current > sma20
+                      else "قیمت پایین‌تر از میانگین ۲۰ روزه"
+                  )
+                  result["analysis_notes"].append(
+                      "برای میانگین ۵۰ روزه هنوز داده کافی وجود ندارد."
+                  )
+
+              result["analysis_notes"].append(
+                  "حمایت و مقاومت، محدوده‌های تقریبی بر اساس ۲۰ رکورد اخیر هستند."
+              )
+
+              return result
+
           quote = fetch(
               "ClosingPrice/GetClosingPriceInfo/" + INS_CODE
           )
 
           info = quote.get("closingPriceInfo")
+
           if not isinstance(info, dict):
               raise Exception("Invalid closing price response")
+
+          market = {
+              "last_price": info.get("pDrCotVal"),
+              "closing_price": info.get("pClosing"),
+              "previous_price": info.get("priceYesterday"),
+              "min_price": info.get("priceMin"),
+              "max_price": info.get("priceMax"),
+              "price_change": info.get("priceChange"),
+              "price_change_percent": info.get("priceChangePercent"),
+              "trade_count": info.get("zTotTran"),
+              "volume": info.get("qTotTran5J"),
+              "trade_value": info.get("qTotCap")
+          }
 
           result = {
               "symbol": "دارونو",
@@ -58,32 +179,19 @@ jobs:
               "source": "TSETMC",
               "updated_at": datetime.now(timezone.utc).isoformat(),
               "status": "success",
-              "market": {
-                  "last_price": info.get("pDrCotVal"),
-                  "closing_price": info.get("pClosing"),
-                  "previous_price": info.get("priceYesterday"),
-                  "min_price": info.get("priceMin"),
-                  "max_price": info.get("priceMax"),
-                  "price_change": info.get("priceChange"),
-                  "price_change_percent": info.get("priceChangePercent"),
-                  "trade_count": info.get("zTotTran"),
-                  "volume": info.get("qTotTran5J"),
-                  "trade_value": info.get("qTotCap")
-              },
-              "raw": {
-                  "closing_price": quote
-              },
+              "market": market,
               "optional_data": {},
-              "data_errors": []
+              "data_errors": [],
+              "analysis": {}
           }
 
-          optional_endpoints = {
-              "history": f"ClosingPrice/GetClosingPriceDailyList/{INS_CODE}/30",
+          endpoints = {
+              "history": f"ClosingPrice/GetClosingPriceDailyList/{INS_CODE}/60",
               "order_book": f"BestLimits/{INS_CODE}",
               "client_type": f"ClientType/GetClientType/{INS_CODE}/1/0"
           }
 
-          for name, path in optional_endpoints.items():
+          for name, path in endpoints.items():
               try:
                   result["optional_data"][name] = fetch(path)
               except Exception as e:
@@ -92,18 +200,31 @@ jobs:
                       "error": str(e)
                   })
 
+          history = result["optional_data"].get("history", {})
+
+          result["analysis"] = analyze(history, market)
+
           os.makedirs("data", exist_ok=True)
 
           with open("data/latest.json", "w", encoding="utf-8") as f:
               json.dump(result, f, ensure_ascii=False, indent=2)
 
-          print(json.dumps(result, ensure_ascii=False, indent=2))
+          with open("data/analysis.json", "w", encoding="utf-8") as f:
+              json.dump(
+                  result["analysis"],
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          print(json.dumps(result["analysis"], ensure_ascii=False, indent=2))
+          print("Market data and analysis saved successfully.")
           PY
 
-      - name: Save market data
+      - name: Save results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest.json
-          git commit -m "Update Darono market data" || echo "No changes"
+          git add data/latest.json data/analysis.json
+          git commit -m "Update Darono market analysis" || echo "No changes"
           git push
