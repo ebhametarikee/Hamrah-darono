@@ -1,17 +1,22 @@
 
-name: Fetch and Analyze Darono
+name: Hamrah Darono - Advanced Analyzer
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 4 * * 0-6"
+    - cron: "30 4 * * *"
 
 permissions:
   contents: write
 
+concurrency:
+  group: darono-analysis
+  cancel-in-progress: false
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout repository
@@ -25,11 +30,9 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-
       - name: Fetch and analyze Darono
         run: |
           python - <<'PY'
-         
           import requests
           import json
           import os
@@ -37,14 +40,17 @@ jobs:
 
           INS_CODE = "34074071043606558"
           BASE = "https://cdn.tsetmc.com/api/"
-
-          headers = {
+          HEADERS = {
               "User-Agent": "Mozilla/5.0",
               "Accept": "application/json"
           }
 
           def fetch(url):
-              response = requests.get(url, headers=headers, timeout=30)
+              response = requests.get(
+                  url,
+                  headers=HEADERS,
+                  timeout=30
+              )
               response.raise_for_status()
               return response.json()
 
@@ -75,6 +81,11 @@ jobs:
 
               return found
 
+          def sma(values, period):
+              if len(values) < period:
+                  return None
+              return sum(values[-period:]) / period
+
           def ema(values, period):
               if len(values) < period:
                   return []
@@ -84,7 +95,8 @@ jobs:
 
               for value in values[period:]:
                   result.append(
-                      (value - result[-1]) * multiplier + result[-1]
+                      (value - result[-1]) * multiplier
+                      + result[-1]
                   )
 
               return result
@@ -98,8 +110,8 @@ jobs:
                   for i in range(1, len(values))
               ]
 
-              gains = [max(change, 0) for change in changes]
-              losses = [max(-change, 0) for change in changes]
+              gains = [max(x, 0) for x in changes]
+              losses = [max(-x, 0) for x in changes]
 
               avg_gain = sum(gains[:period]) / period
               avg_loss = sum(losses[:period]) / period
@@ -114,6 +126,8 @@ jobs:
                   ) / period
 
               if avg_loss == 0:
+                  if avg_gain == 0:
+                      return 50.0
                   return 100.0
 
               rs = avg_gain / avg_loss
@@ -126,7 +140,8 @@ jobs:
               ema12 = ema(values, 12)
               ema26 = ema(values, 26)
 
-              offset = 26 - 12
+              offset = 14
+
               macd_line = [
                   ema12[i + offset] - ema26[i]
                   for i in range(len(ema26))
@@ -139,153 +154,238 @@ jobs:
 
               macd_value = macd_line[-1]
               signal_value = signal_line[-1]
+              histogram = macd_value - signal_value
+
+              if histogram > 0:
+                  status = "مثبت"
+              elif histogram < 0:
+                  status = "منفی"
+              else:
+                  status = "خنثی"
 
               return {
                   "macd": round(macd_value, 2),
                   "signal": round(signal_value, 2),
-                  "histogram": round(macd_value - signal_value, 2),
-                  "status": (
-                      "مثبت؛ MACD بالاتر از خط سیگنال"
-                      if macd_value > signal_value
-                      else "منفی؛ MACD پایین‌تر از خط سیگنال"
-                  )
+                  "histogram": round(histogram, 2),
+                  "status": status
               }
 
+          def save_json(path, data):
+              with open(path, "w", encoding="utf-8") as file:
+                  json.dump(
+                      data,
+                      file,
+                      ensure_ascii=False,
+                      indent=2
+                  )
+
           os.makedirs("data", exist_ok=True)
+
+          updated_at = datetime.now(timezone.utc).isoformat()
 
           latest = {
               "insCode": INS_CODE,
               "instrument_name": "دارونو",
               "source": "TSETMC",
-              "updated_at": datetime.now(timezone.utc).isoformat()
+              "updated_at": updated_at
           }
 
-          data_errors = []
+          analysis = {
+              "updated_at": updated_at,
+              "history_records": 0,
+              "trend": "نامشخص",
+              "entry_status": "داده کافی برای تصمیم‌گیری وجود ندارد",
+              "data_quality": "در انتظار بررسی"
+          }
 
+          errors = []
+
+          # دریافت اطلاعات آخرین معاملات
           try:
               price_data = fetch(
-                  BASE + "ClosingPrice/GetClosingPriceInfo/" + INS_CODE
+                  BASE
+                  + "ClosingPrice/GetClosingPriceInfo/"
+                  + INS_CODE
               )
 
               latest["market_data"] = price_data
 
-          except Exception as error:
-              data_errors.append("price_data: " + str(error))
-              price_data = {}
+              if isinstance(price_data, dict):
+                  latest["last_price"] = number(
+                      price_data.get("pDrCotVal")
+                  )
+                  latest["closing_price"] = number(
+                      price_data.get("pClosing")
+                  )
+                  latest["volume"] = number(
+                      price_data.get("qTotTran5J")
+                  )
+                  latest["trade_value"] = number(
+                      price_data.get("qTotCap")
+                  )
 
+          except Exception as error:
+              errors.append("price_data: " + str(error))
+
+          # دریافت تاریخچه معاملات
           try:
               history_data = fetch(
-                  BASE + "ClosingPrice/GetClosingPriceDailyList/"
-                  + INS_CODE + "/60"
+                  BASE
+                  + "ClosingPrice/GetClosingPriceDailyList/"
+                  + INS_CODE
+                  + "/60"
               )
 
               rows = find_history_rows(history_data)
 
               unique_rows = {}
+
               for row in rows:
                   unique_rows[str(row.get("dEven"))] = row
 
               rows = list(unique_rows.values())
-              rows.sort(key=lambda row: str(row.get("dEven")))
+
+              rows.sort(
+                  key=lambda row: str(row.get("dEven"))
+              )
 
               prices = [
                   number(row.get("pClosing"))
                   for row in rows
               ]
 
-              prices = [value for value in prices if value is not None]
+              prices = [
+                  value for value in prices
+                  if value is not None and value > 0
+              ]
 
-              latest["history_records"] = len(prices)
+              analysis["history_records"] = len(prices)
 
-              analysis = {
-                  "history_records": len(prices),
-                  "updated_at": latest["updated_at"]
-              }
-
-              if len(prices) >= 20:
-                  analysis["sma20"] = round(
-                      sum(prices[-20:]) / 20, 2
+              if len(prices) < 15:
+                  raise ValueError(
+                      "تعداد داده‌های تاریخی برای تحلیل کافی نیست"
                   )
 
+              analysis["data_quality"] = "تاریخچه دریافت شد"
+
+              # میانگین‌های متحرک
+              value20 = sma(prices, 20)
+              value50 = sma(prices, 50)
+
+              if value20 is not None:
+                  analysis["sma20"] = round(value20, 2)
+
+              if value50 is not None:
+                  analysis["sma50"] = round(value50, 2)
+
+              # حمایت و مقاومت
+              if len(prices) >= 20:
                   analysis["support_20"] = round(
                       min(prices[-20:]), 2
                   )
-
                   analysis["resistance_20"] = round(
                       max(prices[-20:]), 2
                   )
 
-              if len(prices) >= 50:
-                  analysis["sma50"] = round(
-                      sum(prices[-50:]) / 50, 2
-                  )
+              # روند
+              if value20 is not None and value50 is not None:
+                  if value20 > value50:
+                      analysis["trend"] = "صعودی"
+                  elif value20 < value50:
+                      analysis["trend"] = "نزولی"
+                  else:
+                      analysis["trend"] = "خنثی"
 
-              if len(prices) >= 15:
-                  rsi = calculate_rsi(prices)
+              # شاخص RSI
+              rsi = calculate_rsi(prices)
+
+              if rsi is not None:
                   analysis["rsi14"] = rsi
 
-                  if rsi is not None:
-                      if rsi >= 70:
-                          analysis["rsi_status"] = "اشباع خرید"
-                      elif rsi <= 30:
-                          analysis["rsi_status"] = "اشباع فروش"
-                      else:
-                          analysis["rsi_status"] = "محدوده میانی"
+                  if rsi >= 70:
+                      analysis["rsi_status"] = "اشباع خرید"
+                  elif rsi <= 30:
+                      analysis["rsi_status"] = "اشباع فروش"
+                  else:
+                      analysis["rsi_status"] = "محدوده میانی"
 
+              # شاخص MACD
               macd = calculate_macd(prices)
 
               if macd is not None:
                   analysis["macd"] = macd
 
-              if "sma20" in analysis and "sma50" in analysis:
-                  if analysis["sma20"] > analysis["sma50"]:
-                      analysis["trend"] = "صعودی"
-                  elif analysis["sma20"] < analysis["sma50"]:
-                      analysis["trend"] = "نزولی"
-                  else:
-                      analysis["trend"] = "خنثی"
+              # فاصله قیمت تا حمایت و مقاومت
+              current_price = (
+                  latest.get("closing_price")
+                  or latest.get("last_price")
+              )
 
+              if current_price is not None:
+                  analysis["current_price"] = current_price
+
+                  if value20 is not None:
+                      analysis["distance_from_sma20_percent"] = round(
+                          ((current_price - value20) / value20) * 100,
+                          2
+                      )
+
+                  if "support_20" in analysis:
+                      analysis["distance_from_support_percent"] = round(
+                          (
+                              (current_price - analysis["support_20"])
+                              / analysis["support_20"]
+                          ) * 100,
+                          2
+                      )
+
+                  if "resistance_20" in analysis:
+                      analysis["distance_from_resistance_percent"] = round(
+                          (
+                              (analysis["resistance_20"] - current_price)
+                              / current_price
+                          ) * 100,
+                          2
+                      )
+
+              # وضعیت اولیه فرصت ورود
               analysis["entry_status"] = (
-                  "نیازمند بررسی و تأیید بیشتر"
+                  "نیازمند تأیید بیشتر؛ سیگنال قطعی صادر نشده است"
               )
 
               analysis["analysis_notes"] = [
-                  "RSI و MACD ابزار کمکی هستند و به‌تنهایی سیگنال خرید نیستند.",
-                  "حمایت و مقاومت بر اساس ۲۰ رکورد اخیر محاسبه می‌شوند.",
-                  "محاسبات بر اساس قیمت پایانی تاریخچه انجام شده‌اند."
+                  "RSI بالای 70 نشان‌دهنده محدوده اشباع خرید است.",
+                  "RSI زیر 30 نشان‌دهنده محدوده اشباع فروش است.",
+                  "MACD باید همراه روند و رفتار قیمت بررسی شود.",
+                  "حمایت و مقاومت بر اساس 20 رکورد اخیر محاسبه شده‌اند.",
+                  "این خروجی توصیه قطعی خرید یا فروش نیست."
               ]
 
-              with open(
-                  "data/analysis.json", "w", encoding="utf-8"
-              ) as file:
-                  json.dump(
-                      analysis, file,
-                      ensure_ascii=False, indent=2
-                  )
-
           except Exception as error:
-              data_errors.append("history_analysis: " + str(error))
+              errors.append("history_analysis: " + str(error))
+              analysis["data_quality"] = "خطا در دریافت یا تحلیل تاریخچه"
+              analysis["analysis_error"] = str(error)
 
-          latest["data_errors"] = data_errors
+          latest["data_errors"] = errors
+          analysis["data_errors"] = errors
 
-          with open(
-              "data/latest.json", "w", encoding="utf-8"
-          ) as file:
-              
-              json.dump(
-                  latest, file,
-                  ensure_ascii=False, indent=2
+          save_json("data/latest.json", latest)
+          save_json("data/analysis.json", analysis)
+
+          print("Darono analysis completed.")
+          print("History records:", analysis["history_records"])
+          print("Trend:", analysis["trend"])
+          print("RSI:", analysis.get("rsi14"))
+          print("MACD:", analysis.get("macd"))
+          print("Errors:", errors)
+
+          if errors:
+              raise RuntimeError(
+                  "برخی از داده‌ها با خطا مواجه شدند"
               )
           PY
 
       - name: Commit updated data
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest.json data/analysis.json
-          git diff --cached --quiet || git commit -m "Update Darono analysis"
-          git push
-
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
