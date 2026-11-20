@@ -36,10 +36,11 @@ jobs:
           import requests
           import json
           import os
-          from datetime import datetime, timezone
+          from datetime import datetime, timezone, date
 
           INS_CODE = "34074071043606558"
           BASE = "https://cdn.tsetmc.com/api/"
+
           HEADERS = {
               "User-Agent": "Mozilla/5.0",
               "Accept": "application/json"
@@ -62,6 +63,27 @@ jobs:
               except (ValueError, TypeError):
                   return None
 
+          def find_market_object(obj):
+              if isinstance(obj, dict):
+                  if (
+                      "pClosing" in obj
+                      or "pDrCotVal" in obj
+                  ):
+                      return obj
+
+                  for value in obj.values():
+                      result = find_market_object(value)
+                      if result is not None:
+                          return result
+
+              elif isinstance(obj, list):
+                  for item in obj:
+                      result = find_market_object(item)
+                      if result is not None:
+                          return result
+
+              return None
+
           def find_history_rows(obj, found=None):
               if found is None:
                   found = []
@@ -69,7 +91,7 @@ jobs:
               if isinstance(obj, dict):
                   if "pClosing" in obj and "dEven" in obj:
                       price = number(obj.get("pClosing"))
-                      if price is not None:
+                      if price is not None and price > 0:
                           found.append(obj)
 
                   for value in obj.values():
@@ -126,9 +148,7 @@ jobs:
                   ) / period
 
               if avg_loss == 0:
-                  if avg_gain == 0:
-                      return 50.0
-                  return 100.0
+                  return 50.0 if avg_gain == 0 else 100.0
 
               rs = avg_gain / avg_loss
               return round(100 - (100 / (1 + rs)), 2)
@@ -179,9 +199,24 @@ jobs:
                       indent=2
                   )
 
+          def parse_market_date(value):
+              if not value:
+                  return None
+
+              try:
+                  value = str(value)[:8]
+                  return datetime.strptime(
+                      value,
+                      "%Y%m%d"
+                  ).date()
+              except (ValueError, TypeError):
+                  return None
+
           os.makedirs("data", exist_ok=True)
 
-          updated_at = datetime.now(timezone.utc).isoformat()
+          updated_at = datetime.now(
+              timezone.utc
+          ).isoformat()
 
           latest = {
               "insCode": INS_CODE,
@@ -195,12 +230,13 @@ jobs:
               "history_records": 0,
               "trend": "نامشخص",
               "entry_status": "داده کافی برای تصمیم‌گیری وجود ندارد",
-              "data_quality": "در انتظار بررسی"
+              "data_quality": "در انتظار بررسی",
+              "entry_score": 0
           }
 
           errors = []
 
-          # دریافت اطلاعات آخرین معاملات
+          # دریافت اطلاعات بازار
           try:
               price_data = fetch(
                   BASE
@@ -210,24 +246,54 @@ jobs:
 
               latest["market_data"] = price_data
 
-              if isinstance(price_data, dict):
-                  latest["last_price"] = number(
-                      price_data.get("pDrCotVal")
+              # اصلاح ساختار تو در توی پاسخ TSETMC
+              market = find_market_object(price_data)
+
+              if market is None:
+                  raise ValueError(
+                      "اطلاعات قیمت در پاسخ TSETMC پیدا نشد"
                   )
-                  latest["closing_price"] = number(
-                      price_data.get("pClosing")
-                  )
-                  latest["volume"] = number(
-                      price_data.get("qTotTran5J")
-                  )
-                  latest["trade_value"] = number(
-                      price_data.get("qTotCap")
-                  )
+
+              latest["last_price"] = number(
+                  market.get("pDrCotVal")
+              )
+
+              latest["closing_price"] = number(
+                  market.get("pClosing")
+              )
+
+              latest["volume"] = number(
+                  market.get("qTotTran5J")
+              )
+
+              latest["trade_value"] = number(
+                  market.get("qTotCap")
+              )
+
+              latest["price_min"] = number(
+                  market.get("priceMin")
+              )
+
+              latest["price_max"] = number(
+                  market.get("priceMax")
+              )
+
+              latest["price_yesterday"] = number(
+                  market.get("priceYesterday")
+              )
+
+              market_date = (
+                  market.get("dEven")
+                  or market.get("finalLastDate")
+              )
+
+              latest["market_date"] = market_date
 
           except Exception as error:
               errors.append("price_data: " + str(error))
+              market = None
 
-          # دریافت تاریخچه معاملات
+          # دریافت تاریخچه
           try:
               history_data = fetch(
                   BASE
@@ -254,16 +320,22 @@ jobs:
                   for row in rows
               ]
 
+              valid_rows = [
+                  row for row in rows
+                  if number(row.get("pClosing")) is not None
+                  and number(row.get("pClosing")) > 0
+              ]
+
               prices = [
-                  value for value in prices
-                  if value is not None and value > 0
+                  number(row.get("pClosing"))
+                  for row in valid_rows
               ]
 
               analysis["history_records"] = len(prices)
 
-              if len(prices) < 15:
+              if len(prices) < 35:
                   raise ValueError(
-                      "تعداد داده‌های تاریخی برای تحلیل کافی نیست"
+                      "حداقل 35 رکورد معتبر برای تحلیل لازم است"
                   )
 
               analysis["data_quality"] = "تاریخچه دریافت شد"
@@ -279,13 +351,13 @@ jobs:
                   analysis["sma50"] = round(value50, 2)
 
               # حمایت و مقاومت
-              if len(prices) >= 20:
-                  analysis["support_20"] = round(
-                      min(prices[-20:]), 2
-                  )
-                  analysis["resistance_20"] = round(
-                      max(prices[-20:]), 2
-                  )
+              analysis["support_20"] = round(
+                  min(prices[-20:]), 2
+              )
+
+              analysis["resistance_20"] = round(
+                  max(prices[-20:]), 2
+              )
 
               # روند
               if value20 is not None and value50 is not None:
@@ -296,7 +368,7 @@ jobs:
                   else:
                       analysis["trend"] = "خنثی"
 
-              # شاخص RSI
+              # RSI
               rsi = calculate_rsi(prices)
 
               if rsi is not None:
@@ -309,62 +381,229 @@ jobs:
                   else:
                       analysis["rsi_status"] = "محدوده میانی"
 
-              # شاخص MACD
+              # MACD
               macd = calculate_macd(prices)
 
               if macd is not None:
                   analysis["macd"] = macd
 
-              # فاصله قیمت تا حمایت و مقاومت
+              # حجم معاملات تاریخی
+              historical_volumes = []
+
+              for row in valid_rows:
+                  volume = number(row.get("qTotTran5J"))
+
+                  if volume is not None and volume > 0:
+                      historical_volumes.append({
+                          "date": str(row.get("dEven")),
+                          "volume": volume
+                      })
+
+              # حذف روز جاری از میانگین مقایسه‌ای
+              current_market_date = str(
+                  latest.get("market_date") or ""
+              )
+
+              comparison_volumes = [
+                  item["volume"]
+                  for item in historical_volumes
+                  if item["date"] != current_market_date
+              ]
+
+              recent_volumes = comparison_volumes[-20:]
+
+              if recent_volumes:
+                  average_volume = (
+                      sum(recent_volumes) / len(recent_volumes)
+                  )
+
+                  analysis["average_volume_20"] = round(
+                      average_volume, 2
+                  )
+
+                  current_volume = latest.get("volume")
+
+                  if current_volume is not None and average_volume > 0:
+                      volume_ratio = (
+                          current_volume / average_volume
+                      )
+
+                      analysis["volume_ratio"] = round(
+                          volume_ratio, 2
+                      )
+
+                      if volume_ratio >= 1.5:
+                          analysis["volume_status"] = "بالاتر از میانگین"
+                      elif volume_ratio >= 1:
+                          analysis["volume_status"] = "نزدیک میانگین"
+                      else:
+                          analysis["volume_status"] = "پایین‌تر از میانگین"
+
+              # قیمت مبنای تحلیل
               current_price = (
                   latest.get("closing_price")
                   or latest.get("last_price")
               )
 
+              analysis["last_price"] = latest.get("last_price")
+              analysis["closing_price"] = latest.get("closing_price")
+              analysis["volume"] = latest.get("volume")
+              analysis["trade_value"] = latest.get("trade_value")
+              analysis["market_date"] = latest.get("market_date")
+
               if current_price is not None:
                   analysis["current_price"] = current_price
 
-                  if value20 is not None:
+                  if value20:
                       analysis["distance_from_sma20_percent"] = round(
                           ((current_price - value20) / value20) * 100,
                           2
                       )
 
-                  if "support_20" in analysis:
+                  support = analysis["support_20"]
+                  resistance = analysis["resistance_20"]
+
+                  if support > 0:
                       analysis["distance_from_support_percent"] = round(
-                          (
-                              (current_price - analysis["support_20"])
-                              / analysis["support_20"]
-                          ) * 100,
+                          ((current_price - support) / support) * 100,
                           2
                       )
 
-                  if "resistance_20" in analysis:
+                  if current_price > 0:
                       analysis["distance_from_resistance_percent"] = round(
-                          (
-                              (analysis["resistance_20"] - current_price)
-                              / current_price
-                          ) * 100,
+                          ((resistance - current_price) / current_price) * 100,
                           2
                       )
 
-              # وضعیت اولیه فرصت ورود
-              analysis["entry_status"] = (
-                  "نیازمند تأیید بیشتر؛ سیگنال قطعی صادر نشده است"
+              # بررسی تازگی داده بازار
+              parsed_date = parse_market_date(
+                  latest.get("market_date")
               )
 
+              if parsed_date:
+                  age_days = (
+                      datetime.now(timezone.utc).date()
+                      - parsed_date
+                  ).days
+
+                  analysis["market_data_age_days"] = age_days
+
+                  if age_days <= 4:
+                      analysis["market_data_freshness"] = "معتبر"
+                  else:
+                      analysis["market_data_freshness"] = "قدیمی"
+              else:
+                  age_days = None
+                  analysis["market_data_freshness"] = "نامشخص"
+
+              # امتیازدهی فرصت احتمالی ورود
+              score = 0
+              reasons = []
+              warnings = []
+
+              if analysis["trend"] == "صعودی":
+                  score += 25
+                  reasons.append("روند میان‌مدت صعودی است")
+              elif analysis["trend"] == "نزولی":
+                  warnings.append("روند میان‌مدت نزولی است")
+
+              if macd:
+                  if macd["histogram"] > 0:
+                      score += 20
+                      reasons.append("هیستوگرام MACD مثبت است")
+                  else:
+                      warnings.append("MACD تأیید صعودی نمی‌دهد")
+
+              if rsi is not None:
+                  if 45 <= rsi <= 65:
+                      score += 15
+                      reasons.append("RSI در محدوده مناسب بررسی است")
+                  elif 65 < rsi < 70:
+                      score += 8
+                      warnings.append("RSI به محدوده اشباع خرید نزدیک است")
+                  elif rsi >= 70:
+                      warnings.append("RSI در محدوده اشباع خرید است")
+                  elif rsi < 30:
+                      warnings.append("RSI در محدوده اشباع فروش است")
+                  else:
+                      warnings.append("RSI هنوز تأیید کافی نمی‌دهد")
+
+              if (
+                  current_price is not None
+                  and value20 is not None
+                  and current_price > value20
+              ):
+                  score += 15
+                  reasons.append("قیمت بالاتر از میانگین 20 روزه است")
+
+              volume_ratio = analysis.get("volume_ratio")
+
+              if volume_ratio is not None:
+                  if volume_ratio >= 1.5:
+                      score += 15
+                      reasons.append("حجم معاملات قوی‌تر از میانگین است")
+                  elif volume_ratio >= 1:
+                      score += 8
+                  else:
+                      warnings.append("حجم معاملات ضعیف‌تر از میانگین است")
+
+              distance_support = analysis.get(
+                  "distance_from_support_percent"
+              )
+
+              if (
+                  distance_support is not None
+                  and 0 <= distance_support <= 3
+              ):
+                  score += 10
+                  reasons.append("قیمت به محدوده حمایت نزدیک است")
+
+              distance_resistance = analysis.get(
+                  "distance_from_resistance_percent"
+              )
+
+              if (
+                  distance_resistance is not None
+                  and 0 <= distance_resistance <= 1.5
+              ):
+                  score = max(0, score - 15)
+                  warnings.append("قیمت به مقاومت نزدیک است")
+
+              score = min(100, max(0, score))
+
+              analysis["entry_score"] = score
+              analysis["positive_factors"] = reasons
+              analysis["risk_warnings"] = warnings
+
+              # جلوگیری از صدور وضعیت ورود با داده قدیمی
+              if age_days is None or age_days > 4:
+                  entry_status = "داده بازار قدیمی؛ ورود قابل ارزیابی نیست"
+
+              elif score >= 75:
+                  entry_status = "آماده بررسی ورود؛ تأیید نهایی لازم است"
+
+              elif score >= 55:
+                  entry_status = "مراقبت؛ شرایط ورود در حال شکل‌گیری است"
+
+              else:
+                  entry_status = "عدم ورود؛ شرایط کافی فراهم نیست"
+
+              analysis["entry_status"] = entry_status
+
               analysis["analysis_notes"] = [
-                  "RSI بالای 70 نشان‌دهنده محدوده اشباع خرید است.",
-                  "RSI زیر 30 نشان‌دهنده محدوده اشباع فروش است.",
-                  "MACD باید همراه روند و رفتار قیمت بررسی شود.",
-                  "حمایت و مقاومت بر اساس 20 رکورد اخیر محاسبه شده‌اند.",
-                  "این خروجی توصیه قطعی خرید یا فروش نیست."
+                  "امتیاز ورود یک ابزار غربالگری است، نه سیگنال قطعی.",
+                  "قیمت پایانی مبنای اصلی محاسبات تکنیکال است.",
+                  "حجم معاملات با میانگین روزهای تاریخی مقایسه می‌شود.",
+                  "حمایت و مقاومت بر اساس 20 رکورد اخیر هستند.",
+                  "تازگی داده بازار در وضعیت ورود لحاظ می‌شود.",
+                  "برای تصمیم نهایی، NAV و حباب صندوق نیز باید بررسی شوند."
               ]
 
           except Exception as error:
               errors.append("history_analysis: " + str(error))
               analysis["data_quality"] = "خطا در دریافت یا تحلیل تاریخچه"
               analysis["analysis_error"] = str(error)
+              analysis["entry_status"] = "خطا در تحلیل؛ تصمیم ورود صادر نشد"
 
           latest["data_errors"] = errors
           analysis["data_errors"] = errors
@@ -372,11 +611,16 @@ jobs:
           save_json("data/latest.json", latest)
           save_json("data/analysis.json", analysis)
 
-          print("Darono analysis completed.")
-          print("History records:", analysis["history_records"])
-          print("Trend:", analysis["trend"])
+          print("Darono Advanced Analysis Completed")
+          print("History:", analysis["history_records"])
+          print("Last price:", latest.get("last_price"))
+          print("Closing price:", latest.get("closing_price"))
+          print("Volume:", latest.get("volume"))
+          print("Trend:", analysis.get("trend"))
           print("RSI:", analysis.get("rsi14"))
           print("MACD:", analysis.get("macd"))
+          print("Entry score:", analysis.get("entry_score"))
+          print("Entry status:", analysis.get("entry_status"))
           print("Errors:", errors)
 
           if errors:
@@ -390,5 +634,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest.json data/analysis.json
-          git diff --cached --quiet || git commit -m "Update Darono analysis"
+          git diff --cached --quiet || git commit -m "Update Darono advanced analysis"
           git push
