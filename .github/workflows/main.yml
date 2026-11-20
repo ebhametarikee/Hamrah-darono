@@ -1,230 +1,282 @@
 
-name: Hamrah Darono Monitor
+name: Fetch and Analyze Darono
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 4 * * 0-3,6"
+    - cron: "30 4 * * 0-6"
 
 permissions:
   contents: write
 
 jobs:
-  update:
+  analyze:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch and Analyze Darono
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch and analyze Darono
         run: |
-          python - <<'PY'
+          import requests
           import json
           import os
-          import time
-          import urllib.request
           from datetime import datetime, timezone
 
           INS_CODE = "34074071043606558"
           BASE = "https://cdn.tsetmc.com/api/"
 
-          def fetch(path, retries=3):
-              for attempt in range(retries):
-                  try:
-                      req = urllib.request.Request(
-                          BASE + path,
-                          headers={"User-Agent": "Mozilla/5.0"}
-                      )
-                      with urllib.request.urlopen(req, timeout=30) as r:
-                          return json.loads(r.read().decode("utf-8"))
-                  except Exception:
-                      if attempt == retries - 1:
-                          raise
-                      time.sleep(3 * (attempt + 1))
+          headers = {
+              "User-Agent": "Mozilla/5.0",
+              "Accept": "application/json"
+          }
+
+          def fetch(url):
+              response = requests.get(url, headers=headers, timeout=30)
+              response.raise_for_status()
+              return response.json()
 
           def number(value):
               try:
+                  if value is None:
+                      return None
                   return float(value)
-              except (TypeError, ValueError):
+              except (ValueError, TypeError):
                   return None
 
-          def find_history_rows(obj):
-              candidates = []
+          def find_history_rows(obj, found=None):
+              if found is None:
+                  found = []
 
-              def walk(value):
-                  if isinstance(value, dict):
-                      for child in value.values():
-                          walk(child)
-                  elif isinstance(value, list):
-                      valid = [
-                          x for x in value
-                          if isinstance(x, dict)
-                          and number(x.get("pClosing")) is not None
-                      ]
-                      if valid:
-                          candidates.append(valid)
-                      for child in value:
-                          walk(child)
+              if isinstance(obj, dict):
+                  if "pClosing" in obj and "dEven" in obj:
+                      price = number(obj.get("pClosing"))
+                      if price is not None:
+                          found.append(obj)
 
-              walk(obj)
+                  for value in obj.values():
+                      find_history_rows(value, found)
 
-              if not candidates:
+              elif isinstance(obj, list):
+                  for item in obj:
+                      find_history_rows(item, found)
+
+              return found
+
+          def ema(values, period):
+              if len(values) < period:
                   return []
 
-              return max(candidates, key=len)
+              multiplier = 2 / (period + 1)
+              result = [sum(values[:period]) / period]
 
-          def analyze(history, market):
-              rows = find_history_rows(history)
-
-              rows = sorted(
-                  rows,
-                  key=lambda x: str(x.get("dEven", ""))
-              )
-
-              closes = [
-                  number(x.get("pClosing"))
-                  for x in rows
-                  if number(x.get("pClosing")) is not None
-              ]
-
-              result = {
-                  "history_records": len(closes),
-                  "sma20": None,
-                  "sma50": None,
-                  "support_20": None,
-                  "resistance_20": None,
-                  "trend": "اطلاعات ناکافی",
-                  "entry_status": "نیازمند داده بیشتر",
-                  "analysis_notes": []
-              }
-
-              if len(closes) < 20:
-                  result["analysis_notes"].append(
-                      "برای تحلیل معتبر حداقل ۲۰ رکورد تاریخی لازم است."
+              for value in values[period:]:
+                  result.append(
+                      (value - result[-1]) * multiplier + result[-1]
                   )
-                  return result
-
-              current = number(market.get("closing_price"))
-
-              if current is None:
-                  current = closes[-1]
-
-              sma20 = sum(closes[-20:]) / 20
-              result["sma20"] = round(sma20, 2)
-
-              recent20 = closes[-20:]
-              result["support_20"] = min(recent20)
-              result["resistance_20"] = max(recent20)
-
-              if len(closes) >= 50:
-                  sma50 = sum(closes[-50:]) / 50
-                  result["sma50"] = round(sma50, 2)
-
-                  if current > sma20 > sma50:
-                      result["trend"] = "صعودی"
-                  elif current < sma20 < sma50:
-                      result["trend"] = "نزولی"
-                  else:
-                      result["trend"] = "خنثی یا در حال تغییر"
-
-                  if current > sma20 and sma20 > sma50:
-                      result["entry_status"] = "بررسی فرصت ورود؛ تأییدهای بیشتر لازم است"
-                  elif current < sma20 and sma20 < sma50:
-                      result["entry_status"] = "عدم ورود عجولانه؛ روند ضعیف"
-                  else:
-                      result["entry_status"] = "انتظار برای تأیید روند"
-
-              else:
-                  result["trend"] = (
-                      "قیمت بالاتر از میانگین ۲۰ روزه"
-                      if current > sma20
-                      else "قیمت پایین‌تر از میانگین ۲۰ روزه"
-                  )
-                  result["analysis_notes"].append(
-                      "برای میانگین ۵۰ روزه هنوز داده کافی وجود ندارد."
-                  )
-
-              result["analysis_notes"].append(
-                  "حمایت و مقاومت، محدوده‌های تقریبی بر اساس ۲۰ رکورد اخیر هستند."
-              )
 
               return result
 
-          quote = fetch(
-              "ClosingPrice/GetClosingPriceInfo/" + INS_CODE
-          )
+          def calculate_rsi(values, period=14):
+              if len(values) < period + 1:
+                  return None
 
-          info = quote.get("closingPriceInfo")
+              changes = [
+                  values[i] - values[i - 1]
+                  for i in range(1, len(values))
+              ]
 
-          if not isinstance(info, dict):
-              raise Exception("Invalid closing price response")
+              gains = [max(change, 0) for change in changes]
+              losses = [max(-change, 0) for change in changes]
 
-          market = {
-              "last_price": info.get("pDrCotVal"),
-              "closing_price": info.get("pClosing"),
-              "previous_price": info.get("priceYesterday"),
-              "min_price": info.get("priceMin"),
-              "max_price": info.get("priceMax"),
-              "price_change": info.get("priceChange"),
-              "price_change_percent": info.get("priceChangePercent"),
-              "trade_count": info.get("zTotTran"),
-              "volume": info.get("qTotTran5J"),
-              "trade_value": info.get("qTotCap")
-          }
+              avg_gain = sum(gains[:period]) / period
+              avg_loss = sum(losses[:period]) / period
 
-          result = {
-              "symbol": "دارونو",
-              "insCode": INS_CODE,
-              "source": "TSETMC",
-              "updated_at": datetime.now(timezone.utc).isoformat(),
-              "status": "success",
-              "market": market,
-              "optional_data": {},
-              "data_errors": [],
-              "analysis": {}
-          }
+              for i in range(period, len(changes)):
+                  avg_gain = (
+                      avg_gain * (period - 1) + gains[i]
+                  ) / period
 
-          endpoints = {
-              "history": f"ClosingPrice/GetClosingPriceDailyList/{INS_CODE}/60",
-              "order_book": f"BestLimits/{INS_CODE}",
-              "client_type": f"ClientType/GetClientType/{INS_CODE}/1/0"
-          }
+                  avg_loss = (
+                      avg_loss * (period - 1) + losses[i]
+                  ) / period
 
-          for name, path in endpoints.items():
-              try:
-                  result["optional_data"][name] = fetch(path)
-              except Exception as e:
-                  result["data_errors"].append({
-                      "source": name,
-                      "error": str(e)
-                  })
+              if avg_loss == 0:
+                  return 100.0
 
-          history = result["optional_data"].get("history", {})
+              rs = avg_gain / avg_loss
+              return round(100 - (100 / (1 + rs)), 2)
 
-          result["analysis"] = analyze(history, market)
+          def calculate_macd(values):
+              if len(values) < 35:
+                  return None
+
+              ema12 = ema(values, 12)
+              ema26 = ema(values, 26)
+
+              offset = 26 - 12
+              macd_line = [
+                  ema12[i + offset] - ema26[i]
+                  for i in range(len(ema26))
+              ]
+
+              signal_line = ema(macd_line, 9)
+
+              if not signal_line:
+                  return None
+
+              macd_value = macd_line[-1]
+              signal_value = signal_line[-1]
+
+              return {
+                  "macd": round(macd_value, 2),
+                  "signal": round(signal_value, 2),
+                  "histogram": round(macd_value - signal_value, 2),
+                  "status": (
+                      "مثبت؛ MACD بالاتر از خط سیگنال"
+                      if macd_value > signal_value
+                      else "منفی؛ MACD پایین‌تر از خط سیگنال"
+                  )
+              }
 
           os.makedirs("data", exist_ok=True)
 
-          with open("data/latest.json", "w", encoding="utf-8") as f:
-              json.dump(result, f, ensure_ascii=False, indent=2)
+          latest = {
+              "insCode": INS_CODE,
+              "instrument_name": "دارونو",
+              "source": "TSETMC",
+              "updated_at": datetime.now(timezone.utc).isoformat()
+          }
 
-          with open("data/analysis.json", "w", encoding="utf-8") as f:
-              json.dump(
-                  result["analysis"],
-                  f,
-                  ensure_ascii=False,
-                  indent=2
+          data_errors = []
+
+          try:
+              price_data = fetch(
+                  BASE + "ClosingPrice/GetClosingPriceInfo/" + INS_CODE
               )
 
-          print(json.dumps(result["analysis"], ensure_ascii=False, indent=2))
-          print("Market data and analysis saved successfully.")
-          PY
+              latest["market_data"] = price_data
 
-      - name: Save results
+          except Exception as error:
+              data_errors.append("price_data: " + str(error))
+              price_data = {}
+
+          try:
+              history_data = fetch(
+                  BASE + "ClosingPrice/GetClosingPriceDailyList/"
+                  + INS_CODE + "/60"
+              )
+
+              rows = find_history_rows(history_data)
+
+              unique_rows = {}
+              for row in rows:
+                  unique_rows[str(row.get("dEven"))] = row
+
+              rows = list(unique_rows.values())
+              rows.sort(key=lambda row: str(row.get("dEven")))
+
+              prices = [
+                  number(row.get("pClosing"))
+                  for row in rows
+              ]
+
+              prices = [value for value in prices if value is not None]
+
+              latest["history_records"] = len(prices)
+
+              analysis = {
+                  "history_records": len(prices),
+                  "updated_at": latest["updated_at"]
+              }
+
+              if len(prices) >= 20:
+                  analysis["sma20"] = round(
+                      sum(prices[-20:]) / 20, 2
+                  )
+
+                  analysis["support_20"] = round(
+                      min(prices[-20:]), 2
+                  )
+
+                  analysis["resistance_20"] = round(
+                      max(prices[-20:]), 2
+                  )
+
+              if len(prices) >= 50:
+                  analysis["sma50"] = round(
+                      sum(prices[-50:]) / 50, 2
+                  )
+
+              if len(prices) >= 15:
+                  rsi = calculate_rsi(prices)
+                  analysis["rsi14"] = rsi
+
+                  if rsi is not None:
+                      if rsi >= 70:
+                          analysis["rsi_status"] = "اشباع خرید"
+                      elif rsi <= 30:
+                          analysis["rsi_status"] = "اشباع فروش"
+                      else:
+                          analysis["rsi_status"] = "محدوده میانی"
+
+              macd = calculate_macd(prices)
+
+              if macd is not None:
+                  analysis["macd"] = macd
+
+              if "sma20" in analysis and "sma50" in analysis:
+                  if analysis["sma20"] > analysis["sma50"]:
+                      analysis["trend"] = "صعودی"
+                  elif analysis["sma20"] < analysis["sma50"]:
+                      analysis["trend"] = "نزولی"
+                  else:
+                      analysis["trend"] = "خنثی"
+
+              analysis["entry_status"] = (
+                  "نیازمند بررسی و تأیید بیشتر"
+              )
+
+              analysis["analysis_notes"] = [
+                  "RSI و MACD ابزار کمکی هستند و به‌تنهایی سیگنال خرید نیستند.",
+                  "حمایت و مقاومت بر اساس ۲۰ رکورد اخیر محاسبه می‌شوند.",
+                  "محاسبات بر اساس قیمت پایانی تاریخچه انجام شده‌اند."
+              ]
+
+              with open(
+                  "data/analysis.json", "w", encoding="utf-8"
+              ) as file:
+                  json.dump(
+                      analysis, file,
+                      ensure_ascii=False, indent=2
+                  )
+
+          except Exception as error:
+              data_errors.append("history_analysis: " + str(error))
+
+          latest["data_errors"] = data_errors
+
+          with open(
+              "data/latest.json", "w", encoding="utf-8"
+          ) as file:
+              json.dump(
+                  latest, file,
+                  ensure_ascii=False, indent=2
+              )
+
+      - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest.json data/analysis.json
-          git commit -m "Update Darono market analysis" || echo "No changes"
+          git diff --cached --quiet || git commit -m "Update Darono analysis"
           git push
