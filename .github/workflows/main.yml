@@ -17,43 +17,81 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find Darono instrument
+      - name: Fetch Darono market data
         run: |
           python - <<'PY'
           import json
+          import os
           import urllib.request
-          from urllib.parse import quote
+          import time
           from datetime import datetime, timezone
 
-          url = "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/" + quote("دارونو")
+          INS_CODE = "34074071043606558"
+          BASE = "https://cdn.tsetmc.com/api/"
 
-          req = urllib.request.Request(
-              url,
-              headers={"User-Agent": "Mozilla/5.0"}
+          def fetch(path, retries=3):
+              url = BASE + path
+              for attempt in range(retries):
+                  try:
+                      req = urllib.request.Request(
+                          url,
+                          headers={"User-Agent": "Mozilla/5.0"}
+                      )
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          return json.loads(r.read().decode("utf-8"))
+                  except Exception:
+                      if attempt == retries - 1:
+                          raise
+                      time.sleep(3 * (attempt + 1))
+
+          quote = fetch(
+              "ClosingPrice/GetClosingPriceInfo/" + INS_CODE
           )
 
-          with urllib.request.urlopen(req, timeout=30) as response:
-              data = json.loads(response.read().decode("utf-8"))
-
-          items = data.get("instrumentSearch", [])
-          matches = [
-              x for x in items
-              if x.get("lVal18AFC") == "دارونو"
-          ]
-
-          if len(matches) != 1:
-              raise Exception(f"Expected one Darono match, found {len(matches)}")
-
-          item = matches[0]
+          info = quote.get("closingPriceInfo")
+          if not isinstance(info, dict):
+              raise Exception("Invalid closing price response")
 
           result = {
-              "insCode": item["insCode"],
-              "instrument_name": item["lVal18AFC"],
+              "symbol": "دارونو",
+              "insCode": INS_CODE,
               "source": "TSETMC",
-              "updated_at": datetime.now(timezone.utc).isoformat()
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "status": "success",
+              "market": {
+                  "last_price": info.get("pDrCotVal"),
+                  "closing_price": info.get("pClosing"),
+                  "previous_price": info.get("priceYesterday"),
+                  "min_price": info.get("priceMin"),
+                  "max_price": info.get("priceMax"),
+                  "price_change": info.get("priceChange"),
+                  "price_change_percent": info.get("priceChangePercent"),
+                  "trade_count": info.get("zTotTran"),
+                  "volume": info.get("qTotTran5J"),
+                  "trade_value": info.get("qTotCap")
+              },
+              "raw": {
+                  "closing_price": quote
+              },
+              "optional_data": {},
+              "data_errors": []
           }
 
-          import os
+          optional_endpoints = {
+              "history": f"ClosingPrice/GetClosingPriceDailyList/{INS_CODE}/30",
+              "order_book": f"BestLimits/{INS_CODE}",
+              "client_type": f"ClientType/GetClientType/{INS_CODE}/1/0"
+          }
+
+          for name, path in optional_endpoints.items():
+              try:
+                  result["optional_data"][name] = fetch(path)
+              except Exception as e:
+                  result["data_errors"].append({
+                      "source": name,
+                      "error": str(e)
+                  })
+
           os.makedirs("data", exist_ok=True)
 
           with open("data/latest.json", "w", encoding="utf-8") as f:
@@ -62,10 +100,10 @@ jobs:
           print(json.dumps(result, ensure_ascii=False, indent=2))
           PY
 
-      - name: Save results
+      - name: Save market data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/latest.json
-          git commit -m "Find Darono instrument code" || echo "No changes"
+          git commit -m "Update Darono market data" || echo "No changes"
           git push
