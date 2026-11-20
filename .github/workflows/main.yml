@@ -26,7 +26,7 @@ jobs:
         run: pip install requests
 
       - name: Fetch and analyze Darono
-        run: |
+        run: |          python - <<'PY'
           import requests
           import json
           import os
@@ -272,7 +272,7 @@ jobs:
                   latest, file,
                   ensure_ascii=False, indent=2
               )
-
+                    PY
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
