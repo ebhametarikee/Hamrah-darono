@@ -2,7 +2,7 @@
   "insCode": "34074071043606558",
   "instrument_name": "دارونو",
   "source": "TSETMC",
-  "updated_at": "2026-11-24T05:30:54.787526+00:00",
+  "updated_at": "2026-11-25T05:31:40.961939+00:00",
   "market_data": {
     "closingPriceInfo": {
       "instrumentState": {
@@ -18,8 +18,8 @@
         "cEtavalTitle": "مجاز"
       },
       "instrument": null,
-      "lastHEven": 61108,
-      "finalLastDate": 20261123,
+      "lastHEven": 90201,
+      "finalLastDate": 20261125,
       "nvt": 0.0,
       "mop": 0,
       "pRedTran": 0.0,
@@ -27,29 +27,29 @@
       "priceChange": 0.0,
       "priceMin": 0.0,
       "priceMax": 0.0,
-      "priceYesterday": 48626.0,
+      "priceYesterday": 50046.0,
       "priceFirst": 0.0,
       "last": false,
       "id": 0,
       "insCode": "0",
-      "dEven": 20261124,
-      "hEven": 61108,
-      "pClosing": 48626.0,
+      "dEven": 20261125,
+      "hEven": 90201,
+      "pClosing": 50400.0,
       "iClose": false,
       "yClose": false,
-      "pDrCotVal": 48990.0,
-      "zTotTran": 0.0,
-      "qTotTran5J": 0.0,
-      "qTotCap": 0.0
+      "pDrCotVal": 50200.0,
+      "zTotTran": 79.0,
+      "qTotTran5J": 301981.0,
+      "qTotCap": 15219875600.0
     }
   },
-  "last_price": 48990.0,
-  "closing_price": 48626.0,
-  "volume": 0.0,
-  "trade_value": 0.0,
+  "last_price": 50200.0,
+  "closing_price": 50400.0,
+  "volume": 301981.0,
+  "trade_value": 15219875600.0,
   "price_min": 0.0,
   "price_max": 0.0,
-  "price_yesterday": 48626.0,
-  "market_date": 20261124,
+  "price_yesterday": 50046.0,
+  "market_date": 20261125,
   "data_errors": []
 }
