@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-26T05:31:22.171529+00:00",
+  "updated_at": "2026-11-27T05:34:05.457018+00:00",
   "history_records": 60,
   "trend": "صعودی",
   "entry_status": "مراقبت؛ شرایط ورود در حال شکل‌گیری است",
@@ -29,7 +29,7 @@
   "distance_from_sma20_percent": 10.86,
   "distance_from_support_percent": 20.03,
   "distance_from_resistance_percent": 1.13,
-  "market_data_age_days": 1,
+  "market_data_age_days": 2,
   "market_data_freshness": "معتبر",
   "positive_factors": [
     "روند میان‌مدت صعودی است",
