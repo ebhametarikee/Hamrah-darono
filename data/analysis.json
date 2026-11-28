@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-11-27T05:34:05.457018+00:00",
+  "updated_at": "2026-11-28T05:27:54.780898+00:00",
   "history_records": 60,
   "trend": "صعودی",
-  "entry_status": "مراقبت؛ شرایط ورود در حال شکل‌گیری است",
+  "entry_status": "عدم ورود؛ شرایط کافی فراهم نیست",
   "data_quality": "تاریخچه دریافت شد",
-  "entry_score": 60,
+  "entry_score": 45,
   "sma20": 44641.0,
   "sma50": 42568.58,
   "support_20": 41229.0,
@@ -17,28 +17,28 @@
     "histogram": 524.45,
     "status": "مثبت"
   },
-  "average_volume_20": 25930079.65,
-  "volume_ratio": 2.05,
-  "volume_status": "بالاتر از میانگین",
+  "average_volume_20": 27431248.9,
+  "volume_ratio": 0.0,
+  "volume_status": "پایین‌تر از میانگین",
   "last_price": 49103.0,
   "closing_price": 49488.0,
-  "volume": 53085193.0,
-  "trade_value": 2627099155010.0,
-  "market_date": 20261125,
+  "volume": 0.0,
+  "trade_value": 0.0,
+  "market_date": 20261128,
   "current_price": 49488.0,
   "distance_from_sma20_percent": 10.86,
   "distance_from_support_percent": 20.03,
   "distance_from_resistance_percent": 1.13,
-  "market_data_age_days": 2,
+  "market_data_age_days": 0,
   "market_data_freshness": "معتبر",
   "positive_factors": [
     "روند میان‌مدت صعودی است",
     "هیستوگرام MACD مثبت است",
-    "قیمت بالاتر از میانگین 20 روزه است",
-    "حجم معاملات قوی‌تر از میانگین است"
+    "قیمت بالاتر از میانگین 20 روزه است"
   ],
   "risk_warnings": [
     "RSI در محدوده اشباع خرید است",
+    "حجم معاملات ضعیف‌تر از میانگین است",
     "قیمت به مقاومت نزدیک است"
   ],
   "analysis_notes": [
